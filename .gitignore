@@ -1,0 +1,4 @@
+wandb/
+videos/
+log_dir/
+__pycache__/
