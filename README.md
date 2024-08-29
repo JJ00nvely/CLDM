@@ -1,1 +1,1 @@
-# CLDM
+# Resent_ftrs branch -> features extracting like CGL-GAN
