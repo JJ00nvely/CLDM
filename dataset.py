@@ -21,10 +21,20 @@ class ImageLayout(Dataset):
         self.box_list = []
 
         for idx in self.raw_data.keys():
-            for img in self.raw_data[idx]['inpaint_frames_seg']:
-                self.frame_list.append(img.replace('\\','/'))         
-            for box in self.raw_data[idx]['boxes']:
-                self.box_list.append(box)
+            if self.raw_data[idx]['type']==[["vehicle.tesla.cybertruck"]]:
+                pass
+            else:
+                for img in self.raw_data[idx]['inpaint_frames_seg']:
+                    # Window 에서 전처리하면서 생기는 \\ 처리
+                    self.frame_list.append(img.replace('\\','/'))
+                for box in self.raw_data[idx]['boxes']:
+                    self.box_list.append(box)
+                    
+        # for idx in self.raw_data.keys():
+        #     for img in self.raw_data[idx]['inpaint_frames_seg']:
+        #         self.frame_list.append(img.replace('\\','/'))         
+        #     for box in self.raw_data[idx]['boxes']:
+        #         self.box_list.append(box)
         self.image_processor = AutoImageProcessor.from_pretrained("facebook/dinov2-base")
 
     
