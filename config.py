@@ -25,7 +25,7 @@ def get_config():
     config.num_layers = 6
     # Training info
     config.log_interval = 100
-    config.use_temp= True
+    config.use_temp= False
 
     config.optimizer = ml_collections.ConfigDict()
     config.optimizer.num_gpus = torch.cuda.device_count()

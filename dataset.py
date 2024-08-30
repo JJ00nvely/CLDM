@@ -42,7 +42,6 @@ class ImageLayout(Dataset):
         return len(self.frame_list)
 
     def __getitem__(self, index):
-        
         img_path = os.path.join(self.path,self.frame_list[index])
         img = Image.open(img_path)
         W, H = img.size
@@ -55,7 +54,6 @@ class ImageLayout(Dataset):
         box = torch.tensor(box, dtype=torch.float32)       
         sample = {'image' : img , 'box' : box , 'box_cond': box.clone(), 'sr' : img_path}
         return sample
-
 
 class ImageLayout_Val(Dataset):
     def __init__(self, file):

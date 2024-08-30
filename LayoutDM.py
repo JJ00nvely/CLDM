@@ -51,7 +51,10 @@ class CLDM(ModelMixin, ConfigMixin):
         # Adjust Here when there are some problem with Transformer
         self.transformer = Custom(latent_dim=self.latent_dim, num_heads = num_heads, dr_rate = dropout_r, num_layers=num_layers, video_length=video_length, use_temp=self.use_temp)
         
-        self.initialize_out_fc()
+        if self.use_temp:
+            self.initialize_out_fc()
+        else:
+            pass
         self.decode = nn.Linear(258, 4)
         self.size_emb = nn.Sequential(
             nn.Linear(2, int(latent_dim/2)),
