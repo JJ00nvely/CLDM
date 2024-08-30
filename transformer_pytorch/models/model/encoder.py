@@ -7,6 +7,7 @@
 
 import copy
 import torch.nn as nn
+import torch
 
 
 class Encoder(nn.Module):
@@ -18,9 +19,13 @@ class Encoder(nn.Module):
         self.norm = norm
 
     def forward(self, src): # src_mask
+        # B,532, 256 
         out = src
+        emb = src[:,2:,:]
         for layer in self.layers:
-            out = layer(out) # src_mask
+            out = out[:,:2,:]
+            out = torch.cat((out,emb),dim=1)
+            out = layer(out) 
         out = self.norm(out)
-        return out
+        return out[:,2:,:]
     
