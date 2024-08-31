@@ -8,6 +8,7 @@ import logging
 from transformers import Dinov2Model
 from aggr.gpo import GPO
 from transformer_pytorch.models.custom_transformer import Custom
+from image import ImageEncoder
 
 class CLDM(ModelMixin, ConfigMixin):
     def __init__(self,latent_dim=256, num_heads=8, dropout_r=0.,num_layers=6,activation='gelu',
@@ -15,21 +16,13 @@ class CLDM(ModelMixin, ConfigMixin):
         super().__init__()
 
 
-        logging.info('Loading the Vision Encoder')
-        self.visual_encoder  = Dinov2Model.from_pretrained("facebook/dinov2-base")
-        logging.info("freeze vision encoder")
-        for name, param in self.visual_encoder.named_parameters():
-            param.requires_grad = False
-        self.visual_encoder = self.visual_encoder.eval()
-        self.visual_encoder.train = disabled_train
-        logging.info('Loading Dino-v2 Done')
-
         self.num_layers = num_layers
         self.latent_dim = latent_dim
         self.dropout_r = dropout_r
         self.gpo = gpo
         self.use_temp = use_temp
         self.video_length = video_length
+
 
         logging.info('Using Temporal Attention Layer: %s', self.use_temp)
 
@@ -42,16 +35,17 @@ class CLDM(ModelMixin, ConfigMixin):
             # add additional code if we are not use gpool
             pass
 
-        self.image_proj = nn.Linear(768, latent_dim)
-
         self.seq_pos_enc = PositionalEncoding(self.latent_dim, 0.)
-        
+
         self.embed_timestep = TimestepEmbedder(cond_emb_size)
 
-        # Adjust Here when there are some problem with Transformer
+        self.imgencode = ImageEncoder(backbone_name='resnet50')
+
         self.transformer = Custom(latent_dim=self.latent_dim, num_heads = num_heads, dr_rate = dropout_r, num_layers=num_layers, video_length=video_length, use_temp=self.use_temp)
-        
-        self.initialize_out_fc()
+
+        if use_temp:
+            self.initialize_out_fc()
+
         self.decode = nn.Linear(258, 4)
         self.size_emb = nn.Sequential(
             nn.Linear(2, int(latent_dim/2)),
@@ -69,32 +63,25 @@ class CLDM(ModelMixin, ConfigMixin):
                 if out_fc_layer.bias is not None:
                     out_fc_layer.bias.zero_()
 
-    
-    def encode_img(self,image):
-        device = image.device
-        img_emb = self.visual_encoder(image).last_hidden_state.to(device)
-        img_emb = img_emb[:,1:,:]
-        return img_emb
 
     def forward(self, noisy_sample, timesteps): # src : image embedding
 
         image = noisy_sample['image']
+        src = self.imgencode(image)
+
         diff_box = noisy_sample['box']
-
-        src = self.encode_img(image)  # B,256,768 
-
+        
         xy = diff_box[:,:2]
         wh = diff_box[:,2:]
 
         loc_emb = self.loc_emb(xy)
         loc_emb = loc_emb.unsqueeze(1)
-
         size_emb = self.size_emb(wh)
         size_emb = size_emb.unsqueeze(1)
 
         box_emb = torch.cat((loc_emb,size_emb),dim=-1) # B 1 128 X2 -> B 1 256
 
-        img_emb = self.image_proj(src) # B,256,768 -> B,256,256
+
 
         enc_output = torch.cat((img_emb,box_emb), dim=1) # B,257,256
         t_emb = self.embed_timestep(timesteps) # B, 1, 256
