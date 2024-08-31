@@ -9,6 +9,7 @@ from transformers import Dinov2Model
 from aggr.gpo import GPO
 from transformer_pytorch.models.custom_transformer import Custom
 from extractor.image import ImageFeatureExtractor 
+from einops import rearrange
 
 class CLDM(ModelMixin, ConfigMixin):
     def __init__(self,latent_dim=256, num_heads=8, dropout_r=0.,num_layers=6,activation='gelu',
@@ -39,14 +40,22 @@ class CLDM(ModelMixin, ConfigMixin):
         # Adjust Here when there are some problem with Transformer
         self.transformer = Custom(latent_dim=self.latent_dim, num_heads = num_heads, dr_rate = dropout_r, num_layers=num_layers, video_length=video_length, use_temp=self.use_temp)
         
-        self.initialize_out_fc()
-        self.decode = nn.Linear(258, 4)
-        self.size_emb = nn.Sequential(
-            nn.Linear(2, latent_dim),)
+        if self.use_temp == True :
+            self.initialize_out_fc()
+        self.decode = nn.Linear(512, 4)
         
         self.loc_emb = nn.Sequential(
             nn.Linear(2, latent_dim),
         )
+        self.size_emb = nn.Sequential(
+            nn.Linear(2, latent_dim),)
+        # self.loc_decode = nn.Sequential(
+        #     nn.Linear(latent_dim, 2),
+        # )
+        # self.size_decode = nn.Sequential(
+        #     nn.Linear(latent_dim, 2),
+        # )
+        
 
     def initialize_out_fc(self):
         # initialize the project layer's in Additional Temporal Attention Layer
@@ -84,10 +93,9 @@ class CLDM(ModelMixin, ConfigMixin):
         # 여기서 B, 532, 256이 들어가니까 제일 앞에 2칸을 떼어서 사용해야함 한 번 들어가면 두개의 embedding으로 나눠서 사용할 수 있게
         # Output 이 B,2,256 으로 나옴
         # enc_output = self.gpool(enc_output) # B,258 / -> Token 의 각 Feature 를 Aggregation 을 수행
-        xy_output = enc_output[:,0,:]
-        wh_output = enc_output[:,1,:]
         # -> 여기서부터 추가 수정 MLP 2개 넣어서 Regression 후에 Output Noise 를 빼다가져갈 수 있도록 수행 -> 이거 코드 작성하면서 DLT 코드랑 다시 천천히 비교하기
         # 처음 Noise 를 추가해서 loc emb 하고 size emb 어떻게 제대로 나누었는지 box 에다가 Noise 를 한꺼번에 주는지 아니면 x,y,w,h 를 다 따뤄 nOISE 를 주는지 체크하기
+        enc_output = rearrange(enc_output,'b c d -> b 1 (c d)' )
         output_noise = self.decode(enc_output) # B, 4
         return output_noise
         # 추가적으로 생각 가능한 것이 transformer block 별로 conditioned 이 들어갈 수 있도록 작성이 가능할 것
@@ -97,3 +105,5 @@ def disabled_train(self, mode=True):
     """Overwrite model.train with this function to make sure train/eval mode
     does not change anymore."""
     return self
+
+
