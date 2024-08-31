@@ -8,7 +8,7 @@ from ml_collections import config_flags
 from LayoutDM import CLDM
 from cldm_trainer import TrainLoopCLDM
 from utils import set_seed
-from dataset import ImageLayout,ImageLayout_Val
+from dataset import ImageLayout
 from diffusers import DDPMScheduler
 from torch.utils.data import random_split
 
@@ -26,8 +26,8 @@ def main(*args, **kwargs):
 
     LOG.info("Loading data.")
 
-    dataset = ImageLayout(config.train_json)
-    iter_val = ImageLayout_Val(config.val_json)
+    dataset = ImageLayout(type='train')
+    iter_val = ImageLayout(type='val')
 
     accelerator = Accelerator(
         split_batches=config.optimizer.split_batches,

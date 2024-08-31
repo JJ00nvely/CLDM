@@ -42,6 +42,7 @@ class CLDM(ModelMixin, ConfigMixin):
         
         if self.use_temp == True :
             self.initialize_out_fc()
+            
         self.decode = nn.Linear(512, 4)
         
         self.loc_emb = nn.Sequential(
