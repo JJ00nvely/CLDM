@@ -27,5 +27,5 @@ class Encoder(nn.Module):
             out = torch.cat((out,emb),dim=1)
             out = layer(out) 
         out = self.norm(out)
-        return out[:,2:,:]
+        return out[:,:2,:]
     

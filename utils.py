@@ -5,7 +5,7 @@ import colorsys
 import random
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, d_model, dropout=0.05, max_len=5000):
+    def __init__(self, d_model, dropout=0.0, max_len=5000):
         super(PositionalEncoding, self).__init__()
         self.dropout = nn.Dropout(p=dropout)
 

@@ -1,9 +1,8 @@
 import ml_collections
 import torch
 from path import Path
-
 # NCCL_IB_DISABLE=1 NCCL_P2P_DISABLE=1 CUDA_VISIBLE_DEVICES=3 python main2.py --config config.py --workdir baseline_video
-# NCCL_IB_DISABLE=1 NCCL_P2P_DISABLE=1 CUDA_VISIBLE_DEVICES=3 python main.py --config config.py --workdir check1
+# NCCL_IB_DISABLE=1 NCCL_P2P_DISABLE=1 CUDA_VISIBLE_DEVICES=0 python main.py --config config.py --workdir debug
 
 def get_config():
     """Gets the default hyperparameter configuration."""
@@ -25,7 +24,12 @@ def get_config():
     config.num_layers = 6
     # Training info
     config.log_interval = 100
+
+    # Edit here for Image or Video Training
     config.use_temp= False
+    # Feature Extractor
+    config.backbone_name ='resnet18'
+    config.freeze_extractor = True
 
     config.optimizer = ml_collections.ConfigDict()
     config.optimizer.num_gpus = torch.cuda.device_count()
@@ -41,7 +45,7 @@ def get_config():
     config.optimizer.lr = 0.0001
 
     config.optimizer.num_epochs = 30000
-    config.optimizer.batch_size = 256
+    config.optimizer.batch_size = 1
     config.optimizer.split_batches = False
     config.optimizer.num_workers = 8
 

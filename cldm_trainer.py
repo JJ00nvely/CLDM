@@ -18,6 +18,7 @@ from logger_set import LOG
 import time
 import cv2
 from transformers import AutoImageProcessor, Dinov2Model
+from loss import giou
 
 
 def disabled_train(self, mode=True):
@@ -144,24 +145,24 @@ class TrainLoopCLDM:
             noise = torch.randn(batch['box'].shape).to(device)
             bsz = batch['box'].shape[0] 
             # Sample a random timestep for each layout
-            
             t = torch.randint(
                 0, self.diffusion.config.num_train_timesteps, (bsz,), device=device
             ).long()
 
             # Noise part in here 
-            diff_box   = self.diffusion.add_noise(batch['box'], noise ,t)
+            diff_box   = self.diffusion.add_noise(original_samples= batch['box'], timesteps=t, noise=noise)
             # rewrite box with noised version, origina l box is still in batch['box_cond']
             batch['box'] = diff_box
 
             # to(device)
             # Run the model on the noisy layouts
             with self.accelerator.accumulate(self.model):
-
                 noise_pred= self.model(batch, t)
-                # noise or sample ? 
-                loss= F.mse_loss(noise_pred, noise)
-
+                # Change for Predict Box
+                loss_giou = 1 - giou(batch['box_cond'], noise_pred)
+                loss_giou = loss_giou.sum() / bsz
+                loss_mse = F.mse_loss(batch['box_cond'], noise_pred)
+                loss = 0.1* loss_giou+  loss_mse
                 self.accelerator.backward(loss)
 
                 if self.accelerator.sync_gradients:
@@ -170,7 +171,8 @@ class TrainLoopCLDM:
                 self.lr_scheduler.step()
                 self.optimizer.zero_grad()
 
-            losses.setdefault("loss", []).append(loss.detach().item())
+            losses.setdefault("MSE", []).append(loss_mse.detach().item())
+            losses.setdefault("GIOU", []).append(loss_giou.detach().item())
 
             if self.accelerator.sync_gradients & self.accelerator.is_main_process:
                 progress_bar.update(1)
@@ -216,7 +218,7 @@ class TrainLoopCLDM:
 
     # Validation 체크를 위한 code 작성
     def generate_images(self, sample):
-        sample = {'image': sample['image'][:8], 'box':sample['box'][:8], 'sr':sample['sr'][:8]}
+        sample = {'image': sample['image'][:8], 'box':sample['box'][:8], 'sr':sample['sr'][:8], 'box_cond': sample['box_cond'][:8]}
         predicted = self.sample_from_model(sample)
         src = sample['sr']
         src_list = []
@@ -226,17 +228,27 @@ class TrainLoopCLDM:
         box  = predicted
         box = box.cpu().numpy()
         box = (box + 1) / 2
+        original_box = sample['box_cond'].cpu().numpy()
+        original_box = (original_box + 1) / 2
         images_with_bbox  = []
         for i in range(box.shape[0]):
             source =src_list[i].copy()
             width, height =source.size
             cx, cy, w, h =  box[i]
+            ocx,ocy,ow,oh = original_box[i]
             x = int((cx - w / 2) * width)
             y = int((cy - h / 2) * height)
             x2 = int((cx + w / 2) * width)
             y2 = int((cy + h / 2) * height)
+
+            ox = int((ocx - ow / 2) * width)
+            oy = int((ocy - oh / 2) * height)
+            ox2 = int((ocx + ow / 2) * width)
+            oy2 = int((ocy + oh / 2) * height)
+
             draw = ImageDraw.Draw(source)
-            draw.rectangle([x, y, x2, y2], outline="red", width=2)
+            draw.rectangle([x, y, x2, y2], outline="red", width=1)
+            draw.rectangle([ox, oy, ox2, oy2], outline="blue", width=1)
             images_with_bbox.append(source)
         return images_with_bbox
 
@@ -329,12 +341,10 @@ class TrainLoopCLDM:
         shape = sample['box'].shape
         model = self.accelerator.unwrap_model(self.model)
         model.eval()
-
         noisy_batch = {
             'image':sample['image'],
             'box':torch.rand(*shape, dtype=torch.float32, device=self.device)        
         }
-
 
         for i in range(self.diffusion.num_train_timesteps)[::-1]:
 
@@ -342,37 +352,15 @@ class TrainLoopCLDM:
 
             with torch.no_grad():
                 # denoise for step t.
+
                 noise_pred = model(noisy_batch, timesteps=t)
-                bbox_pred = self.diffusion.step(noise_pred, t[0].detach().item(),  noisy_batch['box'], return_dict=True)
-                
+                # print(noise_pred)
+
+                box_pred = self.diffusion.step(noise_pred, t[0].detach().item(), noisy_batch['box'], return_dict=True)
+
                 # updata denoised box
-                noisy_batch['box'] = bbox_pred.prev_sample
+
+                noisy_batch['box'] = box_pred.prev_sample
+
         
-        return bbox_pred.pred_original_sample
-    
-    def init_optimizer(self, model):
-        p_wd, p_non_wd = [], []
-        num_parameters = 0
-        for n, p in self.model.named_parameters():
-            if not p.requires_grad:
-                continue  # frozen weights
-            if p.ndim < 2 or "bias" in n or "ln" in n or "bn" in n: 
-                p_non_wd.append(p)
-            else:
-                p_wd.append(p)
-            num_parameters += p.data.nelement()
-        self.logger.info("number of trainable parameters: %d" % num_parameters)
-        optim_params = [
-            {
-                "params": p_wd,
-                "weight_decay": self.weight_decay,
-            },
-            {"params": p_non_wd, "weight_decay": 0},
-        ]
-        optimizer = torch.optim.AdamW(
-            optim_params,
-            lr=self.lr,
-            weight_decay= self.weight_decay,
-            betas=(self.beta1, self.beta2),
-        )
-        return optimizer
+        return box_pred.pred_original_sample

@@ -43,8 +43,8 @@ def main(*args, **kwargs):
     # Edit attention layer code for torch.nn.trasformer like
     model = CLDM(latent_dim=config.latent_dim, num_layers = config.num_layers, 
                 num_heads=config.num_heads, dropout_r=config.dropout_r, activation='gelu',
-                cond_emb_size=config.cond_emb_size).to(accelerator.device)
-    noise_scheduler = DDPMScheduler(num_train_timesteps=1000)
+                cond_emb_size=config.cond_emb_size, use_temp=config.use_temp, backbone_name=config.backbone_name,freeze_extractor=config.freeze_extractor).to(accelerator.device)
+    noise_scheduler = DDPMScheduler(num_train_timesteps=100, prediction_type='sample', clip_sample=False)
 
     LOG.info("Starting training...")
     TrainLoopCLDM(accelerator=accelerator, model=model, diffusion=noise_scheduler,
