@@ -44,7 +44,7 @@ def main(*args, **kwargs):
     model = CLDM(latent_dim=config.latent_dim, num_layers = config.num_layers, 
                 num_heads=config.num_heads, dropout_r=config.dropout_r, activation='gelu',
                 cond_emb_size=config.cond_emb_size, use_temp=config.use_temp, backbone_name=config.backbone_name,freeze_extractor=config.freeze_extractor).to(accelerator.device)
-    noise_scheduler = DDPMScheduler(num_train_timesteps=100, prediction_type='sample', clip_sample=False)
+    noise_scheduler = DDPMScheduler(num_train_timesteps=250, prediction_type='sample', clip_sample=True)
 
     LOG.info("Starting training...")
     TrainLoopCLDM(accelerator=accelerator, model=model, diffusion=noise_scheduler,

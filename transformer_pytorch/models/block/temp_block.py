@@ -21,8 +21,8 @@ class tempcoder(nn.Module):
     def forward(self, src): # src_mask
         out = src
         out = self.residual1(out, lambda out: self.self_attention(query=out, key=out, value=out)) # , mask=src_mask
-        out = rearrange(out, '(b t) n d -> (b n) t d', t=self.video_length, n=258)
+        out = rearrange(out, '(b t) n d -> (b n) t d', t=self.video_length, n=532)
         out = self.residual3(out, lambda out: self.temp_attention(query=out, key=out, value=out))
-        out = rearrange(out,'(b n) t d -> (b t) n d', t=self.video_length, n=258)
+        out = rearrange(out,'(b n) t d -> (b t) n d', t=self.video_length, n=532)
         out = self.residual2(out, self.position_ff)
         return out

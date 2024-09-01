@@ -5,6 +5,7 @@ import torch
 def giou(bbox1, bbox2):
     if bbox1.size(0) != bbox2.size(0):
         raise ValueError(f"Batch size mismatch: bbox1 {bbox1.size(0)}, bbox2 {bbox2.size(0)}")
+    
 
     def convert_to_xyxy(bbox):
         
@@ -51,4 +52,4 @@ def giou(bbox1, bbox2):
     iou = inter_area / (union_area + 1e-7)
     giou = iou - (enc_area - union_area) / (enc_area + 1e-7)
     
-    return giou
+    return ((1 -giou).sum())/bbox1.size(0)

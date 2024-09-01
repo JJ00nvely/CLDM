@@ -43,6 +43,7 @@ class TrainLoopCLDM:
         self.save_interval = save_interval
         self.diffusion = diffusion
         self.log_interval = log_interval
+        self.giou = 0.1
         self.device = self.accelerator.device
         self.model.deivce = self.accelerator.device
         optimizer = torch.optim.AdamW(model.parameters(), lr=opt_conf.lr, betas=opt_conf.betas,
@@ -159,10 +160,9 @@ class TrainLoopCLDM:
             with self.accelerator.accumulate(self.model):
                 noise_pred= self.model(batch, t)
                 # Change for Predict Box
-                loss_giou = 1 - giou(batch['box_cond'], noise_pred)
-                loss_giou = loss_giou.sum() / bsz
+                loss_giou = giou(batch['box_cond'], noise_pred)
                 loss_mse = F.mse_loss(batch['box_cond'], noise_pred)
-                loss = 0.1* loss_giou+  loss_mse
+                loss = (self.giou* loss_giou+  loss_mse)
                 self.accelerator.backward(loss)
 
                 if self.accelerator.sync_gradients:
@@ -173,12 +173,12 @@ class TrainLoopCLDM:
 
             losses.setdefault("MSE", []).append(loss_mse.detach().item())
             losses.setdefault("GIOU", []).append(loss_giou.detach().item())
-
+            losses.setdefault("loss", []).append(loss.detach().item())
             if self.accelerator.sync_gradients & self.accelerator.is_main_process:
                 progress_bar.update(1)
                 self.global_step += 1
                 logs = {"loss": loss.detach().item(), "lr": self.lr_scheduler.get_last_lr()[0],
-                        "step": self.global_step}
+                        "step": self.global_step, 'MSE':loss_mse.detach().item(), 'GIOU':loss_giou.detach().item()}
                 progress_bar.set_postfix(**logs)
 
             if self.global_step % self.log_interval == 0:
@@ -192,9 +192,9 @@ class TrainLoopCLDM:
         # delete folder if we have already 5 checkpoints
         if self.opt_conf.ckpt_dir.exists():
             ckpts = list(self.opt_conf.ckpt_dir.glob("checkpoint-*"))
-            # sort by epoch
+
             ckpts = sorted(ckpts, key=lambda x: int(x.name.split("-")[1]))
-            # 20개 이상일 때 가장 옛날거 제거 
+
             if len(ckpts) > 20:
                 LOG.info(f"Deleting checkpoint {ckpts[0]}")
                 shutil.rmtree(ckpts[0])
@@ -240,12 +240,11 @@ class TrainLoopCLDM:
             y = int((cy - h / 2) * height)
             x2 = int((cx + w / 2) * width)
             y2 = int((cy + h / 2) * height)
-
+            
             ox = int((ocx - ow / 2) * width)
             oy = int((ocy - oh / 2) * height)
             ox2 = int((ocx + ow / 2) * width)
-            oy2 = int((ocy + oh / 2) * height)
-
+            oy2 = int((ocy + oh / 2) * height)            
             draw = ImageDraw.Draw(source)
             draw.rectangle([x, y, x2, y2], outline="red", width=1)
             draw.rectangle([ox, oy, ox2, oy2], outline="blue", width=1)
