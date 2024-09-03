@@ -1,7 +1,7 @@
 import ml_collections
 import torch
 from path import Path
-# NCCL_IB_DISABLE=1 NCCL_P2P_DISABLE=1 CUDA_VISIBLE_DEVICES=3 python main2.py --config config.py --workdir baseline_video
+# NCCL_IB_DISABLE=1 NCCL_P2P_DISABLE=1 CUDA_VISIBLE_DEVICES=3 python main2.py --config config_video.py --workdir baseline_video
 # NCCL_IB_DISABLE=1 NCCL_P2P_DISABLE=1 CUDA_VISIBLE_DEVICES=4 python main.py --config config.py --workdir debug
 
 def get_config():
@@ -10,7 +10,7 @@ def get_config():
     config = ml_collections.ConfigDict()
     config.log_dir = Path('/workspace/joonsm/City_Layout/log_dir')
     # Exp info
-    config.resume_from_checkpoint = None
+    config.resume_from_checkpoint = True
     # Training info
     config.seed = 42
     # Model Specific
@@ -25,7 +25,7 @@ def get_config():
     # Edit here for Image or Video Training
     config.use_temp= True
     # Feature Extractor
-    config.backbone_name ='resnet18'
+    config.backbone_name ='resnet50'
     config.freeze_extractor = True
 
     config.optimizer = ml_collections.ConfigDict()
@@ -39,7 +39,7 @@ def get_config():
 
     config.optimizer.lr_scheduler = 'cosine'
     config.optimizer.num_warmup_steps = 2_000
-    config.optimizer.lr = 0.00005
+    config.optimizer.lr = 0.00001
 
     config.optimizer.num_epochs = 30000
     config.optimizer.batch_size = 16

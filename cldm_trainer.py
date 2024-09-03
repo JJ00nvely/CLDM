@@ -18,7 +18,7 @@ from logger_set import LOG
 import time
 import cv2
 from transformers import AutoImageProcessor, Dinov2Model
-from loss import giou
+
 
 
 def disabled_train(self, mode=True):
@@ -160,9 +160,9 @@ class TrainLoopCLDM:
             with self.accelerator.accumulate(self.model):
                 noise_pred= self.model(batch, t)
                 # Change for Predict Box
-                loss_giou = giou(batch['box_cond'], noise_pred)
-                loss_mse = F.mse_loss(batch['box_cond'], noise_pred)
-                loss = (self.giou* loss_giou+  loss_mse)
+                # loss_giou = giou(batch['box_cond'], noise_pred)
+                loss = F.mse_loss(batch['box_cond'], noise_pred)
+                # loss = (self.giou* loss_giou+  loss_mse)
                 self.accelerator.backward(loss)
 
                 if self.accelerator.sync_gradients:
@@ -171,14 +171,19 @@ class TrainLoopCLDM:
                 self.lr_scheduler.step()
                 self.optimizer.zero_grad()
 
-            losses.setdefault("MSE", []).append(loss_mse.detach().item())
-            losses.setdefault("GIOU", []).append(loss_giou.detach().item())
+            # losses.setdefault("MSE", []).append(loss_mse.detach().item())
+            # losses.setdefault("GIOU", []).append(loss_giou.detach().item())
             losses.setdefault("loss", []).append(loss.detach().item())
+            
+            # if loss_giou <= 0:
+            #     torch.save(noise_pred, f'{step}noise_pred')
+            #     torch.save(batch['box_cond'], f'{step}box_cond')
+
             if self.accelerator.sync_gradients & self.accelerator.is_main_process:
                 progress_bar.update(1)
                 self.global_step += 1
                 logs = {"loss": loss.detach().item(), "lr": self.lr_scheduler.get_last_lr()[0],
-                        "step": self.global_step, 'MSE':loss_mse.detach().item(), 'GIOU':loss_giou.detach().item()}
+                        "step": self.global_step}
                 progress_bar.set_postfix(**logs)
 
             if self.global_step % self.log_interval == 0:
@@ -244,7 +249,7 @@ class TrainLoopCLDM:
             ox = int((ocx - ow / 2) * width)
             oy = int((ocy - oh / 2) * height)
             ox2 = int((ocx + ow / 2) * width)
-            oy2 = int((ocy + oh / 2) * height)            
+            oy2 = int((ocy + oh / 2) * height)
             draw = ImageDraw.Draw(source)
             draw.rectangle([x, y, x2, y2], outline="red", width=1)
             draw.rectangle([ox, oy, ox2, oy2], outline="blue", width=1)

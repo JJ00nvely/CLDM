@@ -27,8 +27,8 @@ def main(*args, **kwargs):
 
     LOG.info("Loading data.")
 
-    dataset = VideoLayout(config.train_json)
-    iter_val = VideoLayout(config.val_json)
+    dataset = VideoLayout(type='train')
+    iter_val = VideoLayout(type='val')
 
     accelerator = Accelerator(
         split_batches=config.optimizer.split_batches,
@@ -43,13 +43,13 @@ def main(*args, **kwargs):
     # Edit attention layer code for torch.nn.trasformer like
     model = CLDM(latent_dim=config.latent_dim, num_layers = config.num_layers, 
                 num_heads=config.num_heads, dropout_r=config.dropout_r, activation='gelu',
-                cond_emb_size=config.cond_emb_size).to(accelerator.device)
+                cond_emb_size=config.cond_emb_size, use_temp=config.use_temp, backbone_name=config.backbone_name,freeze_extractor=config.freeze_extractor).to(accelerator.device)
     
     # Load the Image Space Layout Generation Model here
-    save_path = "/workspace/joonsm/City_Layout/log_dir/check/checkpoints/checkpoint-0/pytorch_model.bin"
+    save_path = "/workspace/joonsm/City_Layout/log_dir/FPN[50]/checkpoints/checkpoint-50/pytorch_model.bin"
     model.load_state_dict(torch.load(save_path),strict=False)
     
-    noise_scheduler = DDPMScheduler(num_train_timesteps=1000)
+    noise_scheduler = DDPMScheduler(num_train_timesteps=250, prediction_type='sample', clip_sample=True)
 
     LOG.info("Starting training...")
     TrainLoopCLDM(accelerator=accelerator, model=model, diffusion=noise_scheduler,
