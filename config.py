@@ -12,8 +12,6 @@ def get_config():
     config.log_dir = Path('/workspace/joonsm/City_Layout/log_dir')
     # Exp info
     config.dataset_path = Path("/nas2/lait/1000_Members/jjoonvely/carla_new")
-    config.train_json = config.dataset_path / 'pre_seg_combined.json'
-    config.val_json = config.dataset_path / 'pre_seg_combined_val.json' 
     config.resume_from_checkpoint = None
     # Training info
     config.seed = 42
@@ -25,7 +23,7 @@ def get_config():
     config.num_layers = 6
     # Training info
     config.log_interval = 100
-    config.use_temp= False
+    config.use_temp= True
 
     config.optimizer = ml_collections.ConfigDict()
     config.optimizer.num_gpus = torch.cuda.device_count()
@@ -38,10 +36,10 @@ def get_config():
 
     config.optimizer.lr_scheduler = 'cosine'
     config.optimizer.num_warmup_steps = 2_000
-    config.optimizer.lr = 0.0001
+    config.optimizer.lr = 0.00001
 
     config.optimizer.num_epochs = 30000
-    config.optimizer.batch_size = 512
+    config.optimizer.batch_size = 16
     config.optimizer.split_batches = False
     config.optimizer.num_workers = 8
 

@@ -11,7 +11,7 @@ from transformer_pytorch.models.custom_transformer import Custom
 
 class CLDM(ModelMixin, ConfigMixin):
     def __init__(self,latent_dim=256, num_heads=8, dropout_r=0.,num_layers=6,activation='gelu',
-                 cond_emb_size=256,gpo =True, use_temp = False, video_length=16):
+                 cond_emb_size=256,gpo =True, use_temp = True, video_length=16):
         super().__init__()
 
 
@@ -102,7 +102,6 @@ class CLDM(ModelMixin, ConfigMixin):
         enc_output = torch.cat((img_emb,box_emb), dim=1) # B,257,256
         t_emb = self.embed_timestep(timesteps) # B, 1, 256
         enc_output = torch.cat((enc_output,t_emb),dim=1) # B,258,256
-        
         # PE encode
         enc_output = self.seq_pos_enc(enc_output) # '' / LayoutDiffusion 에서는 일단 다 끄고 넣긴 함 
         enc_output=self.transformer(enc_output) # B,258,256 -> DLT 에서는 Timestep 에 관련된 것을 빼고 MLP 를 태운 것으로 확인
