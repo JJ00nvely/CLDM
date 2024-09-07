@@ -11,9 +11,6 @@ def get_config():
     config = ml_collections.ConfigDict()
     config.log_dir = Path('/workspace/joonsm/City_Layout/log_dir')
     # Exp info
-    config.dataset_path = Path("/nas2/lait/1000_Members/jjoonvely/carla_new")
-    config.train_json = config.dataset_path / 'seg_video.json'
-    config.val_json = config.dataset_path / 'seg_video_val.json' 
     config.resume_from_checkpoint = None
     # Training info
     config.seed = 42
@@ -21,11 +18,19 @@ def get_config():
     config.latent_dim = 256
     config.num_heads = 8
     config.dropout_r = 0.
-    config.cond_emb_size =  256
     config.num_layers = 6
     # Training info
     config.log_interval = 100
+
     config.use_temp= True
+
+    # Feature Extractor
+    config.backbone_name ='resnet18'
+
+    # DDPMScheduler
+    config.prediction_type = 'epsilon'
+    config.clip_sample = False
+    config.num_train_timesteps = 250
 
     config.optimizer = ml_collections.ConfigDict()
     config.optimizer.num_gpus = torch.cuda.device_count()
@@ -38,7 +43,7 @@ def get_config():
 
     config.optimizer.lr_scheduler = 'cosine'
     config.optimizer.num_warmup_steps = 2_000
-    config.optimizer.lr = 0.0001
+    config.optimizer.lr = 0.00005
 
     config.optimizer.num_epochs = 30000
     config.optimizer.batch_size = 16

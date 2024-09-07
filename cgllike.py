@@ -9,14 +9,14 @@ import torch
 class CLDM(ModelMixin, ConfigMixin):
     def __init__(self,
                  latent_dim : int = 256,
-                 dropout_r : float = 0.,
                  num_layers : int = 6,
+                 num_heads : int = 8,
                  backbone_name ='resnet50'):
         super(CLDM, self).__init__() 
         self.num_layers = num_layers
         self.latent_dim = latent_dim
         self.backbone_name= backbone_name
-        
+        self.num_heads = num_heads
         self.encoder = ImageEncoder(
             d_model=self.latent_dim,
             backbone_name=self.backbone_name,
@@ -30,7 +30,7 @@ class CLDM(ModelMixin, ConfigMixin):
         self.transformer_decoder = nn.TransformerDecoder(
             decoder_layer=nn.TransformerDecoderLayer(
                 d_model=self.latent_dim,
-                nhead=self.latent_dim,
+                nhead= self.num_heads,
                 batch_first=True,
                 dropout=0.1,
                 norm_first=True,
@@ -93,6 +93,6 @@ class CLDM(ModelMixin, ConfigMixin):
 
         latent = self.transformer_decoder(tgt=layout_enc, memory= src) # Batch,Box[Token], Feature
 
-        decode = self.decode(latent) 
+        decode = self.decode(latent).squeeze(-1) # B, 4 (x,y,w,h)
 
-        return decode # B,4,1 -> Batch_size, (x,y,w,h) , 1
+        return decode 

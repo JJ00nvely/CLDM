@@ -34,6 +34,7 @@ class TrainLoopCLDM:
                  log_interval: int,
                  device: str = 'cpu',
                  resume_from_checkpoint: str = None):
+        
         self.model = model
         self.train_data = train_data
         self.val_data = val_data
@@ -44,6 +45,7 @@ class TrainLoopCLDM:
         self.log_interval = log_interval
         self.device = self.accelerator.device
         self.model.deivce = self.accelerator.device
+
         optimizer = torch.optim.AdamW(model.parameters(), lr=opt_conf.lr, betas=opt_conf.betas,
                                       weight_decay=opt_conf.weight_decay, eps=opt_conf.epsilon)
         train_loader = DataLoader(train_data, batch_size=opt_conf.batch_size,
@@ -103,7 +105,7 @@ class TrainLoopCLDM:
                 img_iter = self.generate_iteratvie(sample2)
                 wandb_images = [wandb.Image(img, caption=f'pred_{i}') for i, img in enumerate(img_bbox)]
                 wandb_images_iter = [wandb.Image(img, caption=f'pred_{i}') for i, img in enumerate(img_iter)]
-                # wandb_images_iter = [wandb.Image(img, caption=f'iter_pred') for img in img_iter]
+
                 wandb.log({"pred": wandb_images})
                 wandb.log({"iter_pred": wandb_images_iter})
             else:
@@ -154,12 +156,13 @@ class TrainLoopCLDM:
             # rewrite box with noised version, origina l box is still in batch['box_cond']
             batch['box'] = diff_box
 
-            # to(device)
+            # in DLT they use the mse loss with box_cond -> it needs to be changed
+
             # Run the model on the noisy layouts
             with self.accelerator.accumulate(self.model):
 
                 noise_pred= self.model(batch, t)
-                # noise or sample ? 
+                
                 loss= F.mse_loss(noise_pred, noise)
 
                 self.accelerator.backward(loss)
@@ -226,17 +229,26 @@ class TrainLoopCLDM:
         box  = predicted
         box = box.cpu().numpy()
         box = (box + 1) / 2
+        original_box = sample['box_cond'].cpu().numpy()
+        original_box = (original_box + 1) / 2
         images_with_bbox  = []
         for i in range(box.shape[0]):
             source =src_list[i].copy()
             width, height =source.size
             cx, cy, w, h =  box[i]
+            ocx,ocy,ow,oh = original_box[i]
             x = int((cx - w / 2) * width)
             y = int((cy - h / 2) * height)
             x2 = int((cx + w / 2) * width)
             y2 = int((cy + h / 2) * height)
+
+            ox = int((ocx - ow / 2) * width)
+            oy = int((ocy - oh / 2) * height)
+            ox2 = int((ocx + ow / 2) * width)
+            oy2 = int((ocy + oh / 2) * height)
             draw = ImageDraw.Draw(source)
-            draw.rectangle([x, y, x2, y2], outline="red", width=2)
+            draw.rectangle([x, y, x2, y2], outline="red", width=1)
+            draw.rectangle([ox, oy, ox2, oy2], outline="blue", width=1)
             images_with_bbox.append(source)
         return images_with_bbox
 
@@ -259,6 +271,7 @@ class TrainLoopCLDM:
         box = (box + 1) / 2
         src = Image.open(sample_['sr'][0])
         width, height =src.size
+
         for i in range(len(box)):
             cx, cy, w, h =  box[i]
             x = int((cx - w / 2) * width)
@@ -350,29 +363,3 @@ class TrainLoopCLDM:
         
         return bbox_pred.pred_original_sample
     
-    def init_optimizer(self, model):
-        p_wd, p_non_wd = [], []
-        num_parameters = 0
-        for n, p in self.model.named_parameters():
-            if not p.requires_grad:
-                continue  # frozen weights
-            if p.ndim < 2 or "bias" in n or "ln" in n or "bn" in n: 
-                p_non_wd.append(p)
-            else:
-                p_wd.append(p)
-            num_parameters += p.data.nelement()
-        self.logger.info("number of trainable parameters: %d" % num_parameters)
-        optim_params = [
-            {
-                "params": p_wd,
-                "weight_decay": self.weight_decay,
-            },
-            {"params": p_non_wd, "weight_decay": 0},
-        ]
-        optimizer = torch.optim.AdamW(
-            optim_params,
-            lr=self.lr,
-            weight_decay= self.weight_decay,
-            betas=(self.beta1, self.beta2),
-        )
-        return optimizer
