@@ -1,1 +1,1 @@
-# Resent_ftrs branch -> features extracting like CGL-GAN
+# CGL-GAN Like model
