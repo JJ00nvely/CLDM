@@ -10,7 +10,6 @@ from cldm_trainer import TrainLoopCLDM
 from utils import set_seed
 from dataset import ImageLayout
 from diffusers import DDPMScheduler
-from torch.utils.data import random_split
 
 FLAGS = flags.FLAGS
 

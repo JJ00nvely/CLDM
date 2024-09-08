@@ -37,9 +37,9 @@ def convert_images_to_video_file(self, images, frame_rate=1):
 
 
 
-def video_make(img_bbox, dir,epoch):
+def video_make(img_bbox, dir,num, epoch):
     bbox=convert_images_to_video_file(img_bbox,frame_rate=1)
     os.makedirs(dir, exist_ok=True)
-    local_video_path_bbox = os.path.join(dir, f'pred_bboxes_video_1_epoch_{epoch}.mp4')
+    local_video_path_bbox = os.path.join(dir, f'pred_bboxes_video_{num}_epoch_{epoch}.mp4')
     shutil.copy(bbox, local_video_path_bbox)
     os.remove(bbox)

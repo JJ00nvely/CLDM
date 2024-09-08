@@ -49,6 +49,7 @@ class CLDM(ModelMixin, ConfigMixin):
         )
         self.size_emb = nn.Sequential(
             nn.Linear(2, latent_dim),)
+        
         # self.loc_decode = nn.Sequential(
         #     nn.Linear(latent_dim, 2),
         # )

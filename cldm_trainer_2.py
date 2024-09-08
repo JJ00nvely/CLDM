@@ -23,6 +23,7 @@ import io
 import tempfile
 from loss import bbox_pair_tv_loss
 from einops import rearrange
+from util.video import video_make
 
 def disabled_train(self, mode=True):
     """Overwrite model.train with this function to make sure train/eval mode
@@ -48,11 +49,7 @@ class TrainLoopCLDM:
         self.log_interval = log_interval
         self.device = self.accelerator.device
         self.model.deivce = self.accelerator.device
-        # print("Frozen parameters (requires_grad=False):")
-        # for name, param in self.model.named_parameters():
-        #     if not param.requires_grad:
-        #         print(name)
-        #         print(param.requires_grad)
+
         optimizer = torch.optim.AdamW(model.parameters(), lr=opt_conf.lr, betas=opt_conf.betas,
                                       weight_decay=opt_conf.weight_decay, eps=opt_conf.epsilon)
         train_loader = DataLoader(train_data, batch_size=opt_conf.batch_size,
@@ -69,15 +66,6 @@ class TrainLoopCLDM:
             model, optimizer, train_loader, val_loader, lr_scheduler
         )
 
-        # logging.info('Loading the Vision Encoder')
-        # self.visual_encoder  = Dinov2Model.from_pretrained("facebook/dinov2-base").to(device)
-        # logging.info("freeze vision encoder")
-        # for name, param in self.visual_encoder.named_parameters():
-        #     param.requires_grad = False
-        # self.visual_encoder = self.visual_encoder.eval()
-        # self.visual_encoder.train = disabled_train
-        # logging.info(f'Vision Encoder Training Mode: {self.visual_encoder.training}')
-        # logging.info('Loading Dino-v2 Done')
 
         LOG.info((model.device, self.device))
 
@@ -99,74 +87,6 @@ class TrainLoopCLDM:
         self.resume_from_checkpoint = False
         self.start_time =time.time()
 
-    # def convert_images_to_video_buffer(self, images, frame_rate=1):
-    #     if not images:
-    #         raise ValueError("No images to convert to video")
-
-    #     # Convert PIL images to numpy arrays and ensure they are 3-channel RGB
-    #     processed_images = []
-    #     for img in images:
-    #         # Convert image to numpy array
-    #         img_np = np.array(img)
-    #         # Check if image has 4 channels
-    #         if img_np.shape[2] == 4:
-    #             # Convert RGBA to RGB by discarding the alpha channel
-    #             img_np = img_np[:, :, :3]
-    #         processed_images.append(img_np)
-
-    #     if processed_images[0].ndim != 3 or processed_images[0].shape[2] != 3:
-    #         raise ValueError("Images must have 3 channels (RGB)")
-
-    #     frame_height, frame_width, _ = processed_images[0].shape
-    #     fourcc = cv2.VideoWriter_fourcc(*'mp4v')  
-    #     video_buffer = io.BytesIO()
-
-    #     # Create a temporary video writer that writes to a memory buffer
-    #     video_writer = cv2.VideoWriter('temp.avi', fourcc, frame_rate, (frame_width, frame_height))
-
-    #     for img in processed_images:
-    #         video_writer.write(img)
-
-    #     video_writer.release()
-
-    #     # Read the video from the temporary file into the buffer
-    #     with open('temp.avi', 'rb') as f:
-    #         video_buffer.write(f.read())
-
-    #     video_buffer.seek(0)
-    #     return video_buffer
-
-    def convert_images_to_video_file(self, images, frame_rate=1):
-        if not images:
-            raise ValueError("No images to convert to video")
-
-        # PIL 이미지를 numpy 배열로 변환하고 3채널 RGB인지 확인
-        processed_images = []
-        for img in images:
-            img_np = np.array(img)
-            if img_np.shape[2] == 4:
-                img_np = img_np[:, :, :3]
-            processed_images.append(img_np)
-
-        if processed_images[0].ndim != 3 or processed_images[0].shape[2] != 3:
-            raise ValueError("Images must have 3 channels (RGB)")
-
-        frame_height, frame_width, _ = processed_images[0].shape
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-
-        # 비디오를 저장할 임시 파일 생성
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
-        video_path = temp_file.name
-        temp_file.close()  # OpenCV가 파일에 쓸 수 있도록 파일 닫기
-
-        # 임시 파일에 비디오를 저장하는 VideoWriter 생성
-        video_writer = cv2.VideoWriter(video_path, fourcc, frame_rate, (frame_width, frame_height))
-
-        for img in processed_images:
-            video_writer.write(img)
-
-        video_writer.release()
-        return video_path
 
     def train(self):
         train_val = iter(self.train_dataloader)
@@ -181,52 +101,18 @@ class TrainLoopCLDM:
                 img_bbox, img_bbox1, img_bbox2, img_bbox3 = self.generate_images(sample1)
                 img_bbox_val, img_bbox1_val, img_bbox2_val, img_bbox3_val = self.generate_val(sample2)
                 # 각 이미지 리스트를 비디오 파일로 변환
-                video_path_bbox = self.convert_images_to_video_file(img_bbox, frame_rate=1)
-                video_path_bbox1 = self.convert_images_to_video_file(img_bbox1, frame_rate=1)
-                video_path_bbox2 = self.convert_images_to_video_file(img_bbox2, frame_rate=1)
-                video_path_bbox3 = self.convert_images_to_video_file(img_bbox3, frame_rate=1)
 
-                video_path_bbox_val = self.convert_images_to_video_file(img_bbox_val, frame_rate=1)
-                video_path_bbox1_val = self.convert_images_to_video_file(img_bbox1_val, frame_rate=1)
-                video_path_bbox2_val = self.convert_images_to_video_file(img_bbox2_val, frame_rate=1)
-                video_path_bbox3_val = self.convert_images_to_video_file(img_bbox3_val, frame_rate=1)
-
-                # 비디오 파일을 로컬에 저장
                 local_video_dir = './videos'
                 local_video_dir_val = './videos_val'
 
-                os.makedirs(local_video_dir, exist_ok=True)
-                os.makedirs(local_video_dir_val, exist_ok=True)
-                
-                local_video_path_bbox = os.path.join(local_video_dir, f'pred_bboxes_video_1_epoch_{epoch}.mp4')
-                local_video_path_bbox1 = os.path.join(local_video_dir, f'pred_bboxes_video_2_epoch_{epoch}.mp4')
-                local_video_path_bbox2 = os.path.join(local_video_dir, f'pred_bboxes_video_3_epoch_{epoch}.mp4')
-                local_video_path_bbox3 = os.path.join(local_video_dir, f'pred_bboxes_video_4_epoch_{epoch}.mp4')
-
-                local_video_path_bbox_val = os.path.join(local_video_dir_val, f'pred_bboxes_video_1_epoch_{epoch}.mp4')
-                local_video_path_bbox1_val = os.path.join(local_video_dir_val, f'pred_bboxes_video_2_epoch_{epoch}.mp4')
-                local_video_path_bbox2_val = os.path.join(local_video_dir_val, f'pred_bboxes_video_3_epoch_{epoch}.mp4')
-                local_video_path_bbox3_val = os.path.join(local_video_dir_val, f'pred_bboxes_video_4_epoch_{epoch}.mp4')
-
-                shutil.copy(video_path_bbox, local_video_path_bbox)
-                shutil.copy(video_path_bbox1, local_video_path_bbox1)
-                shutil.copy(video_path_bbox2, local_video_path_bbox2)
-                shutil.copy(video_path_bbox3, local_video_path_bbox3)
-
-                shutil.copy(video_path_bbox_val, local_video_path_bbox_val)
-                shutil.copy(video_path_bbox1_val, local_video_path_bbox1_val)
-                shutil.copy(video_path_bbox2_val, local_video_path_bbox2_val)
-                shutil.copy(video_path_bbox3_val, local_video_path_bbox3_val)
-
-                # 임시 파일 삭제
-                os.remove(video_path_bbox)
-                os.remove(video_path_bbox1)
-                os.remove(video_path_bbox2)
-                os.remove(video_path_bbox3)
-                os.remove(video_path_bbox_val)
-                os.remove(video_path_bbox1_val)
-                os.remove(video_path_bbox2_val)
-                os.remove(video_path_bbox3_val)
+                video_make(img_bbox,local_video_dir,1,epoch)
+                video_make(img_bbox1,local_video_dir,2,epoch)
+                video_make(img_bbox2,local_video_dir,3,epoch)
+                video_make(img_bbox3,local_video_dir,4,epoch)
+                video_make(img_bbox_val,local_video_dir_val,1,epoch)
+                video_make(img_bbox1_val,local_video_dir_val,2,epoch)
+                video_make(img_bbox2_val,local_video_dir_val,3,epoch)
+                video_make(img_bbox3_val,local_video_dir_val,4,epoch)
             else:
                 pass
 

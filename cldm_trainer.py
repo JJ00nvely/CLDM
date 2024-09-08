@@ -159,10 +159,10 @@ class TrainLoopCLDM:
             # Run the model on the noisy layouts
             with self.accelerator.accumulate(self.model):
                 noise_pred= self.model(batch, t)
-                # Change for Predict Box
-                # loss_giou = giou(batch['box_cond'], noise_pred)
-                loss = F.mse_loss(batch['box_cond'], noise_pred)
-                # loss = (self.giou* loss_giou+  loss_mse)
+
+
+                loss = F.mse_loss(batch['box'], noise_pred)
+
                 self.accelerator.backward(loss)
 
                 if self.accelerator.sync_gradients:
@@ -171,13 +171,7 @@ class TrainLoopCLDM:
                 self.lr_scheduler.step()
                 self.optimizer.zero_grad()
 
-            # losses.setdefault("MSE", []).append(loss_mse.detach().item())
-            # losses.setdefault("GIOU", []).append(loss_giou.detach().item())
             losses.setdefault("loss", []).append(loss.detach().item())
-            
-            # if loss_giou <= 0:
-            #     torch.save(noise_pred, f'{step}noise_pred')
-            #     torch.save(batch['box_cond'], f'{step}box_cond')
 
             if self.accelerator.sync_gradients & self.accelerator.is_main_process:
                 progress_bar.update(1)
