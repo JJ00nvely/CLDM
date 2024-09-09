@@ -11,6 +11,7 @@ from utils import set_seed
 from dataset import ImageLayout
 from diffusers import DDPMScheduler
 
+
 FLAGS = flags.FLAGS
 
 config_flags.DEFINE_config_file("config", "Training configuration.",
@@ -43,13 +44,15 @@ def main(*args, **kwargs):
     model = CLDM(latent_dim=config.latent_dim, num_layers = config.num_layers, 
                 num_heads=config.num_heads, backbone_name=config.backbone_name
                 ).to(accelerator.device)
-
+               
     noise_scheduler = DDPMScheduler(num_train_timesteps=config.num_train_timesteps, prediction_type=config.prediction_type,clip_sample=config.clip_sample)
-
-    LOG.info("Starting training...")
+    
+    if accelerator.is_main_process:
+        LOG.info("Prediction type : %s ", config.prediction_type) 
+        LOG.info("Starting training...")
 
     TrainLoopCLDM(accelerator=accelerator, model=model, diffusion=noise_scheduler,
-                 train_data=dataset, val_data=iter_val,  opt_conf=config.optimizer, save_interval = 50,
+                 train_data=dataset, val_data=iter_val,  opt_conf=config.optimizer, save_interval = 10,
                  log_interval=config.log_interval, 
                  device=accelerator.device, resume_from_checkpoint=config.resume_from_checkpoint).train()
     
