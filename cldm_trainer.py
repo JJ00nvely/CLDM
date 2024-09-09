@@ -16,9 +16,6 @@ from diffusers import DDPMScheduler
 import torch.nn.functional as F
 from logger_set import LOG
 import time
-import cv2
-from transformers import AutoImageProcessor, Dinov2Model
-
 
 def disabled_train(self, mode=True):
     """Overwrite model.train with this function to make sure train/eval mode
@@ -48,8 +45,10 @@ class TrainLoopCLDM:
 
         optimizer = torch.optim.AdamW(model.parameters(), lr=opt_conf.lr, betas=opt_conf.betas,
                                       weight_decay=opt_conf.weight_decay, eps=opt_conf.epsilon)
+        
         train_loader = DataLoader(train_data, batch_size=opt_conf.batch_size,
                                   shuffle=True, num_workers=opt_conf.num_workers)
+        
         val_loader = DataLoader(val_data, batch_size=4,
                                 shuffle=True, num_workers=opt_conf.num_workers)
         
@@ -62,10 +61,9 @@ class TrainLoopCLDM:
             model, optimizer, train_loader, val_loader, lr_scheduler
         )
 
-        LOG.info((model.device, self.device))
 
         self.total_batch_size = opt_conf.batch_size * accelerator.num_processes * opt_conf.gradient_accumulation_steps
-        self.num_update_steps_per_epoch = math.ceil(len(train_loader) / opt_conf.gradient_accumulation_steps)
+        self.num_update_steps_per_epoch = math.ceil(len(train_loader) / (accelerator.num_processes * opt_conf.gradient_accumulation_steps))
         self.max_train_steps = opt_conf.num_epochs * self.num_update_steps_per_epoch
 
         if self.accelerator.is_main_process:
@@ -97,17 +95,16 @@ class TrainLoopCLDM:
         iter_val = iter(self.val_dataloader)
         for epoch in range(self.first_epoch, self.opt_conf.num_epochs):
             self.train_epoch(epoch)
-            LOG.info(f"Current Epoch={epoch}")
-            if epoch% 1 ==0:
+            if epoch% 10 ==0:
                 sample1 = next(train_val)
                 sample2 = next(iter_val)
-                img_bbox = self.generate_images(sample1)
-                img_iter = self.generate_iteratvie(sample2)
-                wandb_images = [wandb.Image(img, caption=f'pred_{i}') for i, img in enumerate(img_bbox)]
-                wandb_images_iter = [wandb.Image(img, caption=f'pred_{i}') for i, img in enumerate(img_iter)]
+                img_train = self.generate_images(sample1, mode ='train')
+                img_val = self.generate_images(sample2, mode='val')
+                train_infer = [wandb.Image(img, caption=f'pred_{i}') for i, img in enumerate(img_train)]
+                val_infer = [wandb.Image(img, caption=f'pred_{i}') for i, img in enumerate(img_val)]
 
-                wandb.log({"pred": wandb_images})
-                wandb.log({"iter_pred": wandb_images_iter})
+                wandb.log({"train": train_infer})
+                wandb.log({"val": val_infer})
             else:
                 pass
         self.accelerator.end_training()
@@ -115,17 +112,7 @@ class TrainLoopCLDM:
         total_time = time.time() - self.start_time
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
         LOG.info(f"Training Time {total_time_str}")
-
-    def sample2dev(self, sample):
-        for k, v in sample.items():
-            if isinstance(v, torch.Tensor):
-                sample[k] = v.to(self.device)
-            elif isinstance(v, dict):
-                for k1, v1 in v.items():
-                    if isinstance(v1, torch.Tensor):
-                        sample[k][k1] = v1.to(self.device)
-
-                        
+                    
     def train_epoch(self, epoch):
         self.model.train()
         device = self.model.device
@@ -140,30 +127,24 @@ class TrainLoopCLDM:
                 if step % self.opt_conf.gradient_accumulation_steps == 0:
                     progress_bar.update(1)
                 continue
-            self.sample2dev(batch)
 
-            # Sample noise that we'll add to the boxes
+            batch['image'] = batch['image'].to(device)
+            
             noise = torch.randn(batch['box'].shape).to(device)
             bsz = batch['box'].shape[0] 
-            # Sample a random timestep for each layout
             
             t = torch.randint(
-                0, self.diffusion.config.num_train_timesteps, (bsz,), device=device
-            ).long()
-
-            # Noise part in here 
-            diff_box   = self.diffusion.add_noise(batch['box'], noise ,t)
-            # rewrite box with noised version, origina l box is still in batch['box_cond']
+                0, self.diffusion.config.num_train_timesteps, (bsz,), device=device, dtype=torch.int64
+            )
+            diff_box = self.diffusion.add_noise(batch['box'], noise ,t)
             batch['box'] = diff_box
 
-            # in DLT they use the mse loss with box_cond -> it needs to be changed
 
-            # Run the model on the noisy layouts
             with self.accelerator.accumulate(self.model):
 
                 noise_pred= self.model(batch, t)
-                
-                loss= F.mse_loss(noise_pred, noise)
+
+                loss = F.mse_loss(batch['box_cond'],noise_pred)
 
                 self.accelerator.backward(loss)
 
@@ -175,7 +156,7 @@ class TrainLoopCLDM:
 
             losses.setdefault("loss", []).append(loss.detach().item())
 
-            if self.accelerator.sync_gradients & self.accelerator.is_main_process:
+            if self.accelerator.sync_gradients :
                 progress_bar.update(1)
                 self.global_step += 1
                 logs = {"loss": loss.detach().item(), "lr": self.lr_scheduler.get_last_lr()[0],
@@ -196,14 +177,11 @@ class TrainLoopCLDM:
             # sort by epoch
             ckpts = sorted(ckpts, key=lambda x: int(x.name.split("-")[1]))
             # 20개 이상일 때 가장 옛날거 제거 
-            if len(ckpts) > 20:
+            if len(ckpts) > 10:
                 LOG.info(f"Deleting checkpoint {ckpts[0]}")
                 shutil.rmtree(ckpts[0])
-        if epoch%self.save_interval==0 or epoch==self.opt_conf.num_epochs-1 & self.accelerator.is_main_process:
+        if (epoch % self.save_interval == 0 or epoch == self.opt_conf.num_epochs - 1) and self.accelerator.is_main_process:
             self.accelerator.save_model(self.model, save_path, "50GB", safe_serialization=False)
-        # self.model.save_pretrained(save_path) 
-        LOG.info(f"Saving checkpoint to {save_path}")
-        
         # unwrapped_model = self.accelerator.unwrap_model(self.model)
         # save_state_dict = self.accelerator.get_state_dict(self.model)
         # unwrapped_model.save_pretrained(f'test{self.global_step}',is_main_process=self.accelerator.is_main_process, max_shard_size=10,
@@ -212,17 +190,21 @@ class TrainLoopCLDM:
         # # 이렇게 저장할 시 추후 DDP 래퍼를 처리해야할 수 있다고 하니까 만약 문제가 생길 시 해당 부분 처리할 수 있도록해야함
         # self.accelerator.save_state(save_path)
         # self.model.save_pretrained(save_path, max_shard_size=5)
-        LOG.info(f"Saving checkpoint to {save_path}")
+
 
 
 ####################################################################################################################################################################################
 
-    # Validation 체크를 위한 code 작성
-    def generate_images(self, sample):
-        sample = {'image': sample['image'][:8], 'box':sample['box'][:8], 'sr':sample['sr'][:8]}
+    def generate_images(self, sample,mode):
+        if mode =='train':
+            sample = {'image': sample['image'][:8], 'box':sample['box'][:8], 'sr':sample['sr'][:8],'box_cond': sample['box_cond'][:8]}
+        else:
+            pass
+
         predicted = self.sample_from_model(sample)
+
         src = sample['sr']
-        src_list = []
+        src_list = [] 
         for i in src:
             src_ = Image.open(i)
             src_list.append(src_)
@@ -247,96 +229,98 @@ class TrainLoopCLDM:
             ox2 = int((ocx + ow / 2) * width)
             oy2 = int((ocy + oh / 2) * height)
             draw = ImageDraw.Draw(source)
+
             draw.rectangle([x, y, x2, y2], outline="red", width=1)
+            
             draw.rectangle([ox, oy, ox2, oy2], outline="blue", width=1)
             images_with_bbox.append(source)
         return images_with_bbox
 
-    def generate_iteratvie(self,sample):
-        b_list = []
-        b_list_ = []
-        b_list__ = []
-        b_list___ = []
-        sample_ = {'image': sample['image'][0:1], 'box':sample['box'][0:1], 'sr':sample['sr'][0:1]}
-        sample__ = {'image': sample['image'][1:2], 'box':sample['box'][1:2], 'sr':sample['sr'][1:2]}
-        sample___ = {'image': sample['image'][2:3], 'box':sample['box'][2:3], 'sr':sample['sr'][2:3]}
-        sample____ = {'image': sample['image'][3:4], 'box':sample['box'][3:4], 'sr':sample['sr'][3:4]}
-        images_with_bbox  = []
+    # def generate_iteratvie(self,sample):
+    #     b_list = []
+    #     b_list_ = []
+    #     b_list__ = []
+    #     b_list___ = []
+    #     sample_ = {'image': sample['image'][0:1], 'box':sample['box'][0:1], 'sr':sample['sr'][0:1]}
+    #     sample__ = {'image': sample['image'][1:2], 'box':sample['box'][1:2], 'sr':sample['sr'][1:2]}
+    #     sample___ = {'image': sample['image'][2:3], 'box':sample['box'][2:3], 'sr':sample['sr'][2:3]}
+    #     sample____ = {'image': sample['image'][3:4], 'box':sample['box'][3:4], 'sr':sample['sr'][3:4]}
+    #     images_with_bbox  = []
 
-        for i in range(5):
-            predicted_ = self.sample_from_model(sample_)
-            b_list.append(predicted_)
-        box = torch.stack(b_list).squeeze(1)
-        box =  box.cpu().numpy()
-        box = (box + 1) / 2
-        src = Image.open(sample_['sr'][0])
-        width, height =src.size
+    #     for i in range(5):
+    #         predicted_ = self.sample_from_model(sample_)
+    #         b_list.append(predicted_)
+    #     box = torch.stack(b_list).squeeze(1)
+    #     box =  box.cpu().numpy()
+    #     box = (box + 1) / 2
+    #     src = Image.open(sample_['sr'][0])
+    #     width, height =src.size
 
-        for i in range(len(box)):
-            cx, cy, w, h =  box[i]
-            x = int((cx - w / 2) * width)
-            y = int((cy - h / 2) * height)
-            x2 = int((cx + w / 2) * width)
-            y2 = int((cy + h / 2) * height)
-            draw = ImageDraw.Draw(src)
-            draw.rectangle([x, y, x2, y2], outline="red", width=2)
-        images_with_bbox.append(src)
+    #     for i in range(len(box)):
+    #         cx, cy, w, h =  box[i]
+    #         x = int((cx - w / 2) * width)
+    #         y = int((cy - h / 2) * height)
+    #         x2 = int((cx + w / 2) * width)
+    #         y2 = int((cy + h / 2) * height)
+    #         draw = ImageDraw.Draw(src)
+    #         draw.rectangle([x, y, x2, y2], outline="red", width=2)
+    #     images_with_bbox.append(src)
 
-        for i in range(5):
-            predicted_ = self.sample_from_model(sample__)
-            b_list_.append(predicted_)
-        box = torch.stack(b_list_).squeeze(1)
-        box =  box.cpu().numpy()
-        box = (box + 1) / 2
-        src1 = Image.open(sample__['sr'][0])
-        width, height =src1.size
-        for i in range(len(box)):
-            cx, cy, w, h =  box[i]
-            x = int((cx - w / 2) * width)
-            y = int((cy - h / 2) * height)
-            x2 = int((cx + w / 2) * width)
-            y2 = int((cy + h / 2) * height)
-            draw = ImageDraw.Draw(src1)
-            draw.rectangle([x, y, x2, y2], outline="red", width=2)
-        images_with_bbox.append(src1)
+    #     for i in range():
+    #         predicted_ = self.sample_from_model(sample__)
+    #         b_list_.append(predicted_)
+    #     box = torch.stack(b_list_).squeeze(1)
+    #     box =  box.cpu().numpy()
+    #     box = (box + 1) / 2
+    #     src1 = Image.open(sample__['sr'][0])
+    #     width, height =src1.size
+    #     for i in range(len(box)):
+    #         cx, cy, w, h =  box[i]
+    #         x = int((cx - w / 2) * width)
+    #         y = int((cy - h / 2) * height)
+    #         x2 = int((cx + w / 2) * width)
+    #         y2 = int((cy + h / 2) * height)
+    #         draw = ImageDraw.Draw(src1)
+    #         draw.rectangle([x, y, x2, y2], outline="red", width=2)
+    #     images_with_bbox.append(src1)
 
-        for i in range(5):
-            predicted_ = self.sample_from_model(sample___)
-            b_list__.append(predicted_)
-        box = torch.stack(b_list__).squeeze(1)
-        box =  box.cpu().numpy()
-        box = (box + 1) / 2
-        src2 = Image.open(sample___['sr'][0])
-        width, height =src2.size
-        for i in range(len(box)):
-            cx, cy, w, h =  box[i]
-            x = int((cx - w / 2) * width)
-            y = int((cy - h / 2) * height)
-            x2 = int((cx + w / 2) * width)
-            y2 = int((cy + h / 2) * height)
-            draw = ImageDraw.Draw(src2)
-            draw.rectangle([x, y, x2, y2], outline="red", width=2)
-        images_with_bbox.append(src2)
+    #     for i in range(5):
+    #         predicted_ = self.sample_from_model(sample___)
+    #         b_list__.append(predicted_)
+    #     box = torch.stack(b_list__).squeeze(1)
+    #     box =  box.cpu().numpy()
+    #     box = (box + 1) / 2
+    #     src2 = Image.open(sample___['sr'][0])
+    #     width, height =src2.size
+    #     for i in range(len(box)):
+    #         cx, cy, w, h =  box[i]
+    #         x = int((cx - w / 2) * width)
+    #         y = int((cy - h / 2) * height)
+    #         x2 = int((cx + w / 2) * width)
+    #         y2 = int((cy + h / 2) * height)
+    #         draw = ImageDraw.Draw(src2)
+    #         draw.rectangle([x, y, x2, y2], outline="red", width=2)
+    #     images_with_bbox.append(src2)
 
-        for i in range(5):
-            predicted_ = self.sample_from_model(sample____)
-            b_list___.append(predicted_)
-        box = torch.stack(b_list___).squeeze(1)
-        box =  box.cpu().numpy()
-        box = (box + 1) / 2
-        src3 = Image.open(sample____['sr'][0])
-        width, height =src3.size
-        for i in range(len(box)):
-            cx, cy, w, h =  box[i]
-            x = int((cx - w / 2) * width)
-            y = int((cy - h / 2) * height)
-            x2 = int((cx + w / 2) * width)
-            y2 = int((cy + h / 2) * height)
-            draw = ImageDraw.Draw(src3)
-            draw.rectangle([x, y, x2, y2], outline="red", width=2)
-        images_with_bbox.append(src3)
+    #     for i in range(5):
+    #         predicted_ = self.sample_from_model(sample____)
+    #         b_list___.append(predicted_)
+    #     box = torch.stack(b_list___).squeeze(1)
+    #     box =  box.cpu().numpy()
+    #     box = (box + 1) / 2
+    #     src3 = Image.open(sample____['sr'][0])
+    #     width, height =src3.size
+    #     for i in range(len(box)):
+    #         cx, cy, w, h =  box[i]
+    #         x = int((cx - w / 2) * width)
+    #         y = int((cy - h / 2) * height)
+    #         x2 = int((cx + w / 2) * width)
+    #         y2 = int((cy + h / 2) * height)
+    #         draw = ImageDraw.Draw(src3)
+    #         draw.rectangle([x, y, x2, y2], outline="red", width=2)
+    #     images_with_bbox.append(src3)
 
-        return images_with_bbox      
+    #     return images_with_bbox      
     
     def sample_from_model(self, sample):
         shape = sample['box'].shape
@@ -349,7 +333,7 @@ class TrainLoopCLDM:
         }
 
 
-        for i in range(self.diffusion.num_train_timesteps)[::-1]:
+        for i in range(self.diffusion.config.num_train_timesteps)[::-1]:
 
             t = torch.tensor([i]*shape[0], device=self.device)
 
@@ -362,4 +346,3 @@ class TrainLoopCLDM:
                 noisy_batch['box'] = bbox_pred.prev_sample
         
         return bbox_pred.pred_original_sample
-    

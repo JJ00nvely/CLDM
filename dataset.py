@@ -3,7 +3,6 @@ from torch.utils.data import Dataset
 import json
 import random
 import torch
-import transformers
 from PIL import Image
 import os
 import numpy as np
@@ -22,7 +21,7 @@ class ImageLayout(Dataset):
         self.frame_list = []
         self.box_list = []
         self.transform = transforms.Compose([
-        transforms.Resize((360,360)),
+        transforms.Resize((256,256)),
         transforms.ToTensor()
         ])
         for idx in self.raw_data.keys():
@@ -44,7 +43,7 @@ class ImageLayout(Dataset):
         box = self.box_list[index]
         box = norm_bbox(H, W, box)
         box = np.array(box)
-        box = ((box*2)-1)
-        box = torch.tensor(box, dtype=torch.float32)       
-        sample = {'image' : img , 'box' : box , 'box_cond': box.clone(), 'sr' : img_path}
+        box_ = ((box*2)-1)
+        box = torch.tensor(box_, dtype=torch.float32)       
+        sample = {'image' : img , 'box' : box , 'box_cond': box_.astype(np.float32), 'sr' : img_path}
         return sample
