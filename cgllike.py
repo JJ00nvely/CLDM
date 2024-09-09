@@ -66,7 +66,7 @@ class CLDM(ModelMixin, ConfigMixin):
     def forward(self, noisy_sample, timesteps):
     
         img = noisy_sample['image']
-        src = self.encoder(img.clone())
+        src = self.encoder(img)
         box = noisy_sample['box']
 
 
