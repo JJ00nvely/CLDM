@@ -2,3 +2,5 @@ wandb/
 videos/
 log_dir/
 __pycache__/
+valid.ipynb/
+debug.ipynb/
