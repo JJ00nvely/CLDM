@@ -52,7 +52,7 @@ def main(*args, **kwargs):
         LOG.info("Starting training...")
 
     TrainLoopCLDM(accelerator=accelerator, model=model, diffusion=noise_scheduler,
-                 train_data=dataset, val_data=iter_val,  opt_conf=config.optimizer, save_interval = 10,
+                 train_data=dataset, val_data=iter_val,  opt_conf=config.optimizer, save_interval = config.save_interval,
                  log_interval=config.log_interval, 
                  device=accelerator.device, resume_from_checkpoint=config.resume_from_checkpoint).train()
     

@@ -26,18 +26,19 @@ def get_config():
     config.use_temp= False
 
     # Feature Extractor
-    config.backbone_name ='resnet18'
+    config.backbone_name ='resnet50'
 
     # DDPMScheduler
     config.prediction_type = 'sample'
     config.clip_sample = True
     config.num_train_timesteps = 250
+    config.save_interval = 30
 
     config.optimizer = ml_collections.ConfigDict()
     config.optimizer.num_gpus = torch.cuda.device_count()
     
     config.optimizer.mixed_precision = 'no'
-    config.optimizer.gradient_accumulation_steps = 4
+    config.optimizer.gradient_accumulation_steps = 1
     config.optimizer.betas = (0.95, 0.999)
     config.optimizer.epsilon = 1e-8
     config.optimizer.weight_decay = 1e-6
@@ -47,7 +48,7 @@ def get_config():
     config.optimizer.lr = 0.00005
 
     config.optimizer.num_epochs = 30000
-    config.optimizer.batch_size = 32
+    config.optimizer.batch_size = 64
     config.optimizer.split_batches = False
     config.optimizer.num_workers = 16
 

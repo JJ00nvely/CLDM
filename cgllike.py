@@ -16,7 +16,7 @@ class CLDM(ModelMixin, ConfigMixin):
                  num_layers : int = 6,
                  num_heads : int = 8,
                  use_temp = False,
-                 backbone_name ='resnet18'):
+                 backbone_name ='resnet50'):
         super(CLDM, self).__init__() 
         self.num_layers = num_layers
         self.latent_dim = latent_dim
@@ -28,7 +28,7 @@ class CLDM(ModelMixin, ConfigMixin):
         self.encoder = ImageEncoder(
             d_model=self.latent_dim,
             backbone_name=self.backbone_name,
-            num_layers=self.latent_dim,
+            num_layers=self.num_layers,
             pos_emb="sine",
         )
         self.pos_emb_1d = build_position_encoding_1d(

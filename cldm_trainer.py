@@ -95,7 +95,7 @@ class TrainLoopCLDM:
         iter_val = iter(self.val_dataloader)
         for epoch in range(self.first_epoch, self.opt_conf.num_epochs):
             self.train_epoch(epoch)
-            if epoch% 10 ==0:
+            if epoch% self.save_interval ==0:
                 sample1 = next(train_val)
                 sample2 = next(iter_val)
                 img_train = self.generate_images(sample1, mode ='train')

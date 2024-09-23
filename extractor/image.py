@@ -40,7 +40,7 @@ class ImageEncoder(nn.Module):
         num_layers: int = 6,
         dropout: float = 0.1,
         pos_emb: str = "sine",
-        dim_feedforward: int = 2048,
+        dim_feedforward: int = 1024,
     ) -> None:
         super().__init__()
         self.extractor = ImageFeatureExtractor(
