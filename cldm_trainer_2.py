@@ -21,7 +21,7 @@ from transformers import AutoImageProcessor, Dinov2Model
 from einops import rearrange
 import io
 import tempfile
-from loss import bbox_pair_tv_loss
+
 
 
 def disabled_train(self, mode=True):
@@ -179,66 +179,47 @@ class TrainLoopCLDM:
 
     def train(self):
         train_val = iter(self.train_dataloader)
-        iter_val = iter(self.val_dataloader)
         for epoch in range(self.first_epoch, self.opt_conf.num_epochs):
             self.train_epoch(epoch)
             LOG.info(f"Current Epoch={epoch}")
-            if epoch % 2 == 0:
+            if epoch % 5 == 0:
                 sample1 = next(train_val)
-                sample2 = next(iter_val)
                 img_bbox, img_bbox1, img_bbox2, img_bbox3 = self.generate_images(sample1)
-                img_bbox_val, img_bbox1_val, img_bbox2_val, img_bbox3_val = self.generate_val(sample2)
+
                 # 각 이미지 리스트를 비디오 파일로 변환
                 video_path_bbox = self.convert_images_to_video_file(img_bbox, frame_rate=1)
                 video_path_bbox1 = self.convert_images_to_video_file(img_bbox1, frame_rate=1)
                 video_path_bbox2 = self.convert_images_to_video_file(img_bbox2, frame_rate=1)
                 video_path_bbox3 = self.convert_images_to_video_file(img_bbox3, frame_rate=1)
 
-                video_path_bbox_val = self.convert_images_to_video_file(img_bbox_val, frame_rate=1)
-                video_path_bbox1_val = self.convert_images_to_video_file(img_bbox1_val, frame_rate=1)
-                video_path_bbox2_val = self.convert_images_to_video_file(img_bbox2_val, frame_rate=1)
-                video_path_bbox3_val = self.convert_images_to_video_file(img_bbox3_val, frame_rate=1)
-
                 # 비디오 파일을 로컬에 저장
-                local_video_dir = './videos_tv'
-                local_video_dir_val = './videos_tv_val'
-
+                local_video_dir = './videos'
                 os.makedirs(local_video_dir, exist_ok=True)
-                os.makedirs(local_video_dir_val, exist_ok=True)
-                
+
                 local_video_path_bbox = os.path.join(local_video_dir, f'pred_bboxes_video_1_epoch_{epoch}.mp4')
                 local_video_path_bbox1 = os.path.join(local_video_dir, f'pred_bboxes_video_2_epoch_{epoch}.mp4')
                 local_video_path_bbox2 = os.path.join(local_video_dir, f'pred_bboxes_video_3_epoch_{epoch}.mp4')
                 local_video_path_bbox3 = os.path.join(local_video_dir, f'pred_bboxes_video_4_epoch_{epoch}.mp4')
-
-                local_video_path_bbox_val = os.path.join(local_video_dir_val, f'pred_bboxes_video_1_epoch_{epoch}.mp4')
-                local_video_path_bbox1_val = os.path.join(local_video_dir_val, f'pred_bboxes_video_2_epoch_{epoch}.mp4')
-                local_video_path_bbox2_val = os.path.join(local_video_dir_val, f'pred_bboxes_video_3_epoch_{epoch}.mp4')
-                local_video_path_bbox3_val = os.path.join(local_video_dir_val, f'pred_bboxes_video_4_epoch_{epoch}.mp4')
 
                 shutil.copy(video_path_bbox, local_video_path_bbox)
                 shutil.copy(video_path_bbox1, local_video_path_bbox1)
                 shutil.copy(video_path_bbox2, local_video_path_bbox2)
                 shutil.copy(video_path_bbox3, local_video_path_bbox3)
 
-                shutil.copy(video_path_bbox_val, local_video_path_bbox_val)
-                shutil.copy(video_path_bbox1_val, local_video_path_bbox1_val)
-                shutil.copy(video_path_bbox2_val, local_video_path_bbox2_val)
-                shutil.copy(video_path_bbox3_val, local_video_path_bbox3_val)
+                wandb.log({
+                    "pred_bboxes_video_1": wandb.Video(local_video_path_bbox, caption="Pred BBoxes Video 1"),
+                    "pred_bboxes_video_2": wandb.Video(local_video_path_bbox1, caption="Pred BBoxes Video 2"),
+                    "pred_bboxes_video_3": wandb.Video(local_video_path_bbox2, caption="Pred BBoxes Video 3"),
+                    "pred_bboxes_video_4": wandb.Video(local_video_path_bbox3, caption="Pred BBoxes Video 4")
+                })
 
                 # 임시 파일 삭제
                 os.remove(video_path_bbox)
                 os.remove(video_path_bbox1)
                 os.remove(video_path_bbox2)
                 os.remove(video_path_bbox3)
-                os.remove(video_path_bbox_val)
-                os.remove(video_path_bbox1_val)
-                os.remove(video_path_bbox2_val)
-                os.remove(video_path_bbox3_val)
             else:
                 pass
-
-            
     def sample2dev(self, sample):
         for k, v in sample.items():
             if isinstance(v, torch.Tensor):
@@ -286,10 +267,8 @@ class TrainLoopCLDM:
 
                 noise_pred= self.model(batch, t)
                 # noise or sample ? 
-                # loss_mse = F.mse_loss(rearrange(batch['box_cond'], 'b c d -> (b c) d'), noise_pred)
-                loss_mse= F.mse_loss(noise_pred, noise)
-                tv_loss = bbox_pair_tv_loss(noise_pred, frames=16, tv_weight=0.01)
-                loss = loss_mse + tv_loss
+                loss= F.mse_loss(noise_pred, noise)
+
                 self.accelerator.backward(loss)
 
                 if self.accelerator.sync_gradients:
@@ -298,13 +277,12 @@ class TrainLoopCLDM:
                 self.lr_scheduler.step()
                 self.optimizer.zero_grad()
 
-            losses.setdefault("loss_mse", []).append(loss_mse.detach().item())
-            losses.setdefault("tv_loss", []).append(tv_loss.detach().item())
+            losses.setdefault("loss", []).append(loss.detach().item())
 
             if self.accelerator.sync_gradients & self.accelerator.is_main_process:
                 progress_bar.update(1)
                 self.global_step += 1
-                logs = {"loss": loss.detach().item(),"tv_loss":tv_loss.detach().item(), "lr": self.lr_scheduler.get_last_lr()[0],
+                logs = {"loss": loss.detach().item(), "lr": self.lr_scheduler.get_last_lr()[0],
                         "step": self.global_step}
                 progress_bar.set_postfix(**logs)
 
@@ -349,17 +327,10 @@ class TrainLoopCLDM:
         sample2 = {'image': sample['image'][2], 'box':sample['box'][2], 'sr':sample['sr'][2]}
         sample3 = {'image': sample['image'][4], 'box':sample['box'][4], 'sr':sample['sr'][4]}
         sample4 = {'image': sample['image'][6], 'box':sample['box'][6], 'sr':sample['sr'][6]}
-
         predicted = self.sample_from_model(sample1)
         predicted_ = self.sample_from_model(sample2)
         predicted__ = self.sample_from_model(sample3)
         predicted___ = self.sample_from_model(sample4)
-
-        original_box = sample['box_cond'][0]
-        original_box_ = sample['box_cond'][2]
-        original_box__ = sample['box_cond'][4]
-        original_box___ = sample['box_cond'][6]
-
         if sample['sr'][0].is_cuda:
             src = sample['sr'][0].cpu().numpy()
             src1 = sample['sr'][2].cpu().numpy()
@@ -382,161 +353,6 @@ class TrainLoopCLDM:
         box  = predicted
         box = box.cpu().numpy()
         box = (box + 1) / 2
-
-        box_  = original_box
-        box_ = box_.cpu().numpy()
-        box_ = (box_ + 1) / 2
-
-        images_with_bbox  = []
-        for i in range(box.shape[0]):
-            source =src_list[i].copy()
-            width, height =source.size
-            cx, cy, w, h =  box[i]
-            ocx,ocy,ow,oh = box_[i]
-            x = int((cx - w / 2) * width)
-            y = int((cy - h / 2) * height)
-            x2 = int((cx + w / 2) * width)
-            y2 = int((cy + h / 2) * height)
-
-            ox = int((ocx - ow / 2) * width)
-            oy = int((ocy - oh / 2) * height)
-            ox2 = int((ocx + ow / 2) * width)
-            oy2 = int((ocy + oh / 2) * height)
-            draw = ImageDraw.Draw(source)
-            draw.rectangle([x, y, x2, y2], outline="red", width=1)
-            draw.rectangle([ox, oy, ox2, oy2], outline="blue", width=1)
-            images_with_bbox.append(source)
-
-        for i in src1:
-            src_ = Image.fromarray(i, 'RGBA')
-            src_list1.append(src_)
-        box  = predicted_
-        box = box.cpu().numpy()
-        box = (box + 1) / 2
-
-        box_  = original_box_
-        box_ = box_.cpu().numpy()
-        box_ = (box_ + 1) / 2
-
-        images_with_bbox1  = []
-        for i in range(box.shape[0]):
-            source =src_list1[i].copy()
-            width, height =source.size
-            cx, cy, w, h =  box[i]
-            ocx,ocy,ow,oh = box_[i]
-            x = int((cx - w / 2) * width)
-            y = int((cy - h / 2) * height)
-            x2 = int((cx + w / 2) * width)
-            y2 = int((cy + h / 2) * height)
-        
-            ox = int((ocx - ow / 2) * width)
-            oy = int((ocy - oh / 2) * height)
-            ox2 = int((ocx + ow / 2) * width)
-            oy2 = int((ocy + oh / 2) * height)
-
-            draw = ImageDraw.Draw(source)
-            draw.rectangle([x, y, x2, y2], outline="red", width=1)
-            draw.rectangle([ox, oy, ox2, oy2], outline="blue", width=1)
-            images_with_bbox1.append(source)
-
-        for i in src2:
-            src_ = Image.fromarray(i, 'RGBA')
-            src_list2.append(src_)
-        box  = predicted__
-        box = box.cpu().numpy()
-        box = (box + 1) / 2
-
-        box_  = original_box__
-        box_ = box_.cpu().numpy()
-        box_ = (box_ + 1) / 2
-
-        images_with_bbox2  = []
-        for i in range(box.shape[0]):
-            source =src_list2[i].copy()
-            width, height =source.size
-            cx, cy, w, h =  box[i]
-            ocx,ocy,ow,oh = box_[i]
-
-            x = int((cx - w / 2) * width)
-            y = int((cy - h / 2) * height)
-            x2 = int((cx + w / 2) * width)
-            y2 = int((cy + h / 2) * height)
-
-            ox = int((ocx - ow / 2) * width)
-            oy = int((ocy - oh / 2) * height)
-            ox2 = int((ocx + ow / 2) * width)
-            oy2 = int((ocy + oh / 2) * height)
-
-            draw = ImageDraw.Draw(source)
-            draw.rectangle([x, y, x2, y2], outline="red", width=1)
-            draw.rectangle([ox, oy, ox2, oy2], outline="blue", width=1)
-            images_with_bbox2.append(source)
-            
-        for i in src3:
-            src_ = Image.fromarray(i, 'RGBA')
-            src_list3.append(src_)
-
-        box  = predicted___
-        box = box.cpu().numpy()
-        box = (box + 1) / 2
-
-        box_  = original_box___
-        box_ = box_.cpu().numpy()
-        box_ = (box_ + 1) / 2
-
-        images_with_bbox3  = []
-        for i in range(box.shape[0]):
-            source =src_list3[i].copy()
-            width, height =source.size
-            cx, cy, w, h =  box[i]
-            ocx,ocy,ow,oh = box_[i]
-            x = int((cx - w / 2) * width)
-            y = int((cy - h / 2) * height)
-            x2 = int((cx + w / 2) * width)
-            y2 = int((cy + h / 2) * height)
-
-            ox = int((ocx - ow / 2) * width)
-            oy = int((ocy - oh / 2) * height)
-            ox2 = int((ocx + ow / 2) * width)
-            oy2 = int((ocy + oh / 2) * height)
-    
-            draw = ImageDraw.Draw(source)
-            draw.rectangle([x, y, x2, y2], outline="red", width=1)
-            draw.rectangle([ox, oy, ox2, oy2], outline="blue", width=1)
-            images_with_bbox3.append(source)
-        return images_with_bbox,  images_with_bbox1, images_with_bbox2, images_with_bbox3
-
-    def generate_val(self,sample):
-        sample1 = {'image': sample['image'][0], 'box':sample['box'][0], 'sr':sample['sr'][0]}
-        sample2 = {'image': sample['image'][1], 'box':sample['box'][1], 'sr':sample['sr'][1]}
-        sample3 = {'image': sample['image'][2], 'box':sample['box'][2], 'sr':sample['sr'][2]}
-        sample4 = {'image': sample['image'][3], 'box':sample['box'][3], 'sr':sample['sr'][3]}
-        predicted = self.sample_from_model(sample1)
-        predicted_ = self.sample_from_model(sample2)
-        predicted__ = self.sample_from_model(sample3)
-        predicted___ = self.sample_from_model(sample4)
-        if sample['sr'][0].is_cuda:
-            src = sample['sr'][0].cpu().numpy()
-            src1 = sample['sr'][1].cpu().numpy()
-            src2 = sample['sr'][2].cpu().numpy()
-            src3 = sample['sr'][3].cpu().numpy()
-        else:
-            src = sample['sr'][0].numpy()
-            src1 = sample['sr'][1].numpy()
-            src2 = sample['sr'][2].numpy()
-            src3 = sample['sr'][3].numpy()
-
-        src_list = []
-        src_list1 = []
-        src_list2 = []
-        src_list3 = []
-
-        for i in src:
-            src_ = Image.fromarray(i, 'RGBA')
-            src_list.append(src_)
-        box  = predicted
-        box = box.cpu().numpy()
-        box = (box + 1) / 2
         images_with_bbox  = []
         for i in range(box.shape[0]):
             source =src_list[i].copy()
@@ -607,12 +423,98 @@ class TrainLoopCLDM:
             draw.rectangle([x, y, x2, y2], outline="red", width=2)
             images_with_bbox3.append(source)
         return images_with_bbox,  images_with_bbox1, images_with_bbox2, images_with_bbox3
+
+    def generate_iteratvie(self,sample):
+        b_list = []
+        b_list_ = []
+        b_list__ = []
+        b_list___ = []
+        sample_ = {'image': sample['image'][0:1], 'box':sample['box'][0:1], 'sr':sample['sr'][0:1]}
+        sample__ = {'image': sample['image'][1:2], 'box':sample['box'][1:2], 'sr':sample['sr'][1:2]}
+        sample___ = {'image': sample['image'][2:3], 'box':sample['box'][2:3], 'sr':sample['sr'][2:3]}
+        sample____ = {'image': sample['image'][3:4], 'box':sample['box'][3:4], 'sr':sample['sr'][3:4]}
+        images_with_bbox  = []
+
+        for i in range(5):
+            predicted_ = self.sample_from_model(sample_)
+            b_list.append(predicted_)
+        box = torch.stack(b_list).squeeze(1)
+        box =  box.cpu().numpy()
+        box = (box + 1) / 2
+        src = Image.open(sample_['sr'][0])
+        width, height =src.size
+        for i in range(len(box)):
+            cx, cy, w, h =  box[i]
+            x = int((cx - w / 2) * width)
+            y = int((cy - h / 2) * height)
+            x2 = int((cx + w / 2) * width)
+            y2 = int((cy + h / 2) * height)
+            draw = ImageDraw.Draw(src)
+            draw.rectangle([x, y, x2, y2], outline="red", width=2)
+        images_with_bbox.append(src)
+
+        for i in range(5):
+            predicted_ = self.sample_from_model(sample__)
+            b_list_.append(predicted_)
+        box = torch.stack(b_list_).squeeze(1)
+        box =  box.cpu().numpy()
+        box = (box + 1) / 2
+        src1 = Image.open(sample__['sr'][0])
+        width, height =src1.size
+        for i in range(len(box)):
+            cx, cy, w, h =  box[i]
+            x = int((cx - w / 2) * width)
+            y = int((cy - h / 2) * height)
+            x2 = int((cx + w / 2) * width)
+            y2 = int((cy + h / 2) * height)
+            draw = ImageDraw.Draw(src1)
+            draw.rectangle([x, y, x2, y2], outline="red", width=2)
+        images_with_bbox.append(src1)
+
+        for i in range(5):
+            predicted_ = self.sample_from_model(sample___)
+            b_list__.append(predicted_)
+        box = torch.stack(b_list__).squeeze(1)
+        box =  box.cpu().numpy()
+        box = (box + 1) / 2
+        src2 = Image.open(sample___['sr'][0])
+        width, height =src2.size
+        for i in range(len(box)):
+            cx, cy, w, h =  box[i]
+            x = int((cx - w / 2) * width)
+            y = int((cy - h / 2) * height)
+            x2 = int((cx + w / 2) * width)
+            y2 = int((cy + h / 2) * height)
+            draw = ImageDraw.Draw(src2)
+            draw.rectangle([x, y, x2, y2], outline="red", width=2)
+        images_with_bbox.append(src2)
+
+        for i in range(5):
+            predicted_ = self.sample_from_model(sample____)
+            b_list___.append(predicted_)
+        box = torch.stack(b_list___).squeeze(1)
+        box =  box.cpu().numpy()
+        box = (box + 1) / 2
+        src3 = Image.open(sample____['sr'][0])
+        width, height =src3.size
+        for i in range(len(box)):
+            cx, cy, w, h =  box[i]
+            x = int((cx - w / 2) * width)
+            y = int((cy - h / 2) * height)
+            x2 = int((cx + w / 2) * width)
+            y2 = int((cy + h / 2) * height)
+            draw = ImageDraw.Draw(src3)
+            draw.rectangle([x, y, x2, y2], outline="red", width=2)
+        images_with_bbox.append(src3)
+
+        return images_with_bbox      
     
     def sample_from_model(self, sample):
 
         # sample['image'] = rearrange(batch['image'], 'b f c w h -> (b f) c w h' )
         # sample['box'] = rearrange(batch['box'], 'b f h -> (b f) h' )
         shape = sample['box'].shape
+        print(shape)
         model = self.accelerator.unwrap_model(self.model)
         model.eval()
 
